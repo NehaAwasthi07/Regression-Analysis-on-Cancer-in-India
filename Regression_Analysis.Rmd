@@ -1,0 +1,146 @@
+---
+title: "Regression_Project"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Let's start by importing the required libraries and the datset
+
+Import the libraries
+
+```{r}
+options(scipen=999) #avoid scientific notation
+library(dplyr)
+library(ggplot2)
+library(ggcorrplot)
+library(readxl)
+```
+
+Import the dataset
+
+```{r}
+cancer <- read_excel("~/Desktop/MGIS/Project 1 attached files Oct 25, 2022 607 PM/cancer_m.xlsx")
+head(cancer)
+```
+
+## Geographical Analysis of the cancer incidence rate
+
+Let's group the median income of the counties by states and figure which regions are the most prone to cancer.
+
+```{r}
+# Regions prone to Cancer grouped by States
+States <- cancer %>% group_by(State) %>% summarise("States_incidenceRate" = mean(incidenceRate)) %>% arrange(desc(States_incidenceRate))
+head(States)
+```
+
+## Cancer Incidence rate analysis after categorising the median county income
+
+Let's see the distribution of median income to determine the intervals in the categories
+
+```{r}
+hist(cancer$medIncome, breaks = 20, main = 'Distribution of Median Income', xlab ='Median Income', col = 'light blue')
+```
+
+Now, we divide the median county income into four categories of low, medium, high and very_high
+
+```{r}
+#create the 4-level indicator 
+cancer$medIncome_categories <- as.factor(ifelse(cancer$medIncome<40000, "low",
+                                     ifelse(cancer$medIncome<60000, "medium",
+                                            ifelse(cancer$medIncome<80000,"high","very_high"))))
+head(cancer)
+```
+
+Next, we render a boxplot of medIncome_categories and incidenceRate to guauge the distribution
+
+```{r}
+ggplot(cancer, aes(x=medIncome_categories, y= incidenceRate)) +
+  geom_boxplot(fill = 'light blue')
+```
+
+## Correlation Analysis
+
+Let's create a correlation matrix for all relevant numeric variables to analyse the correlation between various factors
+
+```{r}
+cor_df<-cancer[,sapply(cancer,is.numeric)] # only keeping the numeric variables in the dataframe
+head(cor_df)
+cor_df<-cor_df[-1] # dropping countyCode as a variable in the analysis
+head(cor_df)
+cor_mat<-cor(cor_df) # correlation matrix
+cor_mat
+```
+
+Lets' visualize the correlation matrix using a heatmap
+
+```{r}
+ggcorrplot(cor_mat, method ="square", lab =TRUE)
+```
+
+## Regression Analysis
+
+Here we are going to build a linear regression model that predicts the cancer incidence rate.
+Before moving onto linear regression for incidenceRate, we know that PovertyEst and povertyPercent contain the same basic information and we can see from the correlation matrix that povertyEst is highly correlated with popEst2015 so let's drop povertyEst as an independent variable so as not to overfit out model.
+We are not considering fiveYearTrend because it is a numerical variable with a large number of missing values and won't be a good predictor
+We are also not considering deathRate as an independent variable to predict incidenceRate despite it having a considerable correlation with the incidenceRrate because dependence and causality are the other way around for these variables.
+
+We modify the dataset so that the recentTrend variable clubs together all 3 kinds of missing values in "missing" category.
+
+Let's build our linear regression model with all the relevant variables
+
+```{r}
+fit<- lm(incidenceRate ~  povertyPercent+ popEst2015  + avgAnnCount + medIncome + recentTrend + avgDeathsPerYear, data= cancer)
+summary(fit)
+```
+
+We can see that coefficents for povertyPercent, medIncome and avgDeathsPerYear are not significant so let's modify our model to drop those
+
+```{r}
+fit<- lm(incidenceRate ~   popEst2015  + avgAnnCount + recentTrend, data= cancer)
+summary(fit)
+```
+
+All Coefficients are significant in this model.
+
+## Let's access the stability and accuracy of the model
+
+We will divide the data into training and test set and test our model
+
+```{r}
+# Divide the data into training and testing sets
+set.seed(42) # setting seed for the sake of reproducibility
+n = dim(cancer)[1] # no. of observations in the dataset
+train = sample(1:n, .7*n, replace = FALSE) # sample 70% of observations in the set without replacing 
+head(train) 
+test = setdiff(1:n, train) # observations for the test set
+head(test)
+cancer_train = cancer[train,] # create the training set
+cancer_test = cancer[test,] # create the test set
+
+# Build the model using training set only
+fit<- lm(incidenceRate ~   popEst2015  + avgAnnCount + recentTrend, data= cancer_train)
+summary(fit)
+```
+
+Let's make predictions on the test set using our trained model and calculate the errors
+
+```{r}
+test_preds = predict(fit, cancer_test) # prediction using model fit
+test_errors = cancer_test$incidenceRate - test_preds  #calculate test errors
+mean(abs(fit$residuals)) #mean absolute error for training observations
+mean(abs(test_errors)) #mean absolute error for test observations
+```
+
+As we can see, the difference between mean absolute errors for the training set and test set is negligible so the model seems to be stable.
+
+Let's plot the histogram of both errors to compare the distribution
+
+```{r}
+par(mfrow =c(1,2)) # plot one row, 2 columns
+hist(fit$residuals, col='light blue') # training error
+hist(test_errors, col= 'light blue') # test error
+```
+
+The absolute errors and the multiple R-squared value of the model however suggests that while the model is stable, it is not accurate in predicting incidence rate, which makes sense considering none of the factors had any significant correlation with incidence rate except for the death rate (which we can't use as a predictor variable for the incidence rate)
